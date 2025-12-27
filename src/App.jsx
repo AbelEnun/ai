@@ -289,7 +289,7 @@ function App() {
                 {loading ? (
                   <span className="loading-indicator">Searching...</span>
                 ) : (
-                  <span>Search Flights</span>
+                  <span>Send</span>
                 )}
               </button>
             </div>
