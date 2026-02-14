@@ -1,342 +1,682 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import "./App.css";
+import Sidebar from "./components/Sidebar";
+import SearchInput from "./components/SearchInput";
+import Filters from "./components/Filters";
+import FlightCard from "./components/FlightCard";
+import FlightDetailsModal from "./components/FlightDetailsModal";
 
-const API_URL =
-  "https://gckdcfk4p0.execute-api.us-east-1.amazonaws.com/dev/search";
+const API_URL = "https://gckdcfk4p0.execute-api.us-east-1.amazonaws.com/dev/search";
 
-function App() {
-  const [messages, setMessages] = useState([
-    { 
-      role: "assistant", 
-      text: "Hello! I'm your Flight Assistant. I can help you search for flights, compare options, and find the best travel deals. How can I assist you today?",
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+// --- Helper Functions ---
+const mapOfferToFlight = (offer, journeyType = "outbound") => {
+  // Handle both formats: from FlightAgent lambda (with price) and from chatbot (with totalPrice)
+  const priceAmount = offer.price || offer.totalPrice || 0;
+  const currency = offer.currency || "USD";
+  const durationMinutes = offer.durationMinutes || 0;
+  const durationISO = offer.durationISO || `PT${Math.floor(durationMinutes / 60)}H${durationMinutes % 60}M`;
+
+  // Extract flight number if available
+  let flightNumber = "—";
+  if (offer.flightNumber) {
+    flightNumber = offer.flightNumber;
+  } else if (offer.itineraryIds && offer.itineraryIds.length > 0) {
+    // Try to extract from itineraryIds if available
+    flightNumber = offer.itineraryIds[0]?.slice(-4) || "—";
+  }
+
+  return {
+    id: offer.offerId || offer.id || Math.random().toString(),
+    itinerary: {
+      segments: [
+        {
+          departure: {
+            iata: offer.origin || offer.departureAirport,
+            at: offer.departureTime
+          },
+          arrival: {
+            iata: offer.destination || offer.arrivalAirport,
+            at: offer.arrivalTime
+          },
+          carrier: offer.airline,
+          flightNumber: flightNumber,
+          aircraft: offer.aircraft || "—",
+          duration: durationISO,
+        },
+      ],
+      totalDuration: durationISO,
+    },
+    price: {
+      amount: priceAmount,
+      currency: currency
+    },
+    airline: offer.airline || "Unknown Airline",
+    stops: offer.stops || 0,
+    durationMinutes: durationMinutes,
+    journeyType: journeyType,
+    cached: offer.cached || offer.provider === "cached",
+    // Keep original for reference
+    _raw: offer
+  };
+};
+
+export default function App() {
+  const sessionId = useRef(null);
+
+  // Initialize Session
+  if (!sessionId.current) {
+    const stored = localStorage.getItem("flight_session_id");
+    if (stored) sessionId.current = stored;
+    else {
+      sessionId.current = `sess-${crypto.randomUUID()}`;
+      localStorage.setItem("flight_session_id", sessionId.current);
     }
-  ]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [flightResults, setFlightResults] = useState(null);
-  const chatEndRef = useRef(null);
-  const inputRef = useRef(null);
+  }
 
+  // --- Global State ---
+  const [recentPlans, setRecentPlans] = useState([]);
+
+  // --- Session State ---
+  const [chatHistory, setChatHistory] = useState([]);
+  const [savedFlights, setSavedFlights] = useState([]);
+  const [activeTab, setActiveTab] = useState('planning');
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorObj, setErrorObj] = useState(null);
+
+  const [filters, setFilters] = useState({ maxStops: 'all', maxPrice: 'all' });
+  const [selectedFlight, setSelectedFlight] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Load Global Plans
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    inputRef.current?.focus();
-  }, [messages]);
+    try {
+      const stored = localStorage.getItem("flo_recent_plans");
+      if (stored) setRecentPlans(JSON.parse(stored));
+    } catch (e) { console.error(e); }
+  }, []);
 
-  const formatTime = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // Load Session Data
+  useEffect(() => {
+    const sessId = sessionId.current;
+    const storedSession = localStorage.getItem(`flo_sess_${sessId}`);
+    if (storedSession) {
+      try {
+        const data = JSON.parse(storedSession);
+        if (data.chatHistory) setChatHistory(data.chatHistory);
+        if (data.savedFlights) setSavedFlights(data.savedFlights);
+        if (data.filters) setFilters(data.filters);
+      } catch (e) { console.error(e); }
+    }
+  }, []);
+
+  // Save Session Helper
+  const saveSessionState = (newData) => {
+    const sessId = sessionId.current;
+    const currentData = JSON.parse(localStorage.getItem(`flo_sess_${sessId}`) || '{}');
+    const updated = { ...currentData, ...newData };
+    localStorage.setItem(`flo_sess_${sessId}`, JSON.stringify(updated));
   };
 
-  const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { 
-      weekday: 'short', 
-      month: 'short', 
-      day: 'numeric' 
+  const updatePlanHistory = (origin, destination) => {
+    const label = `${origin} → ${destination}`;
+    const today = new Date().toLocaleDateString("en-US", { month: 'short', day: 'numeric' });
+
+    setRecentPlans(prev => {
+      const id = sessionId.current;
+      const others = prev.filter(p => p.id !== id);
+      const newEntry = { id, route: label, date: today, timestamp: Date.now() };
+      const updated = [newEntry, ...others].slice(0, 10);
+      localStorage.setItem("flo_recent_plans", JSON.stringify(updated));
+      return updated;
     });
   };
 
-  const formatDuration = (duration) => {
-    // Remove PT prefix and format duration
-    const match = duration.match(/PT(\d+H)?(\d+M)?/);
-    if (!match) return duration;
-    
-    const hours = match[1] ? match[1].replace('H', '') : '0';
-    const minutes = match[2] ? match[2].replace('M', '') : '0';
-    
-    return `${hours}h ${minutes}m`;
+  const handleToggleSave = (flight) => {
+    setSavedFlights(prev => {
+      const exists = prev.find(f => f.id === flight.id);
+      const newSaved = exists ? prev.filter(f => f.id !== flight.id) : [...prev, flight];
+      saveSessionState({ savedFlights: newSaved });
+      return newSaved;
+    });
   };
 
-  const FlightCard = ({ flight, index, title }) => {
-    const itinerary = flight.itineraries?.[0];
-    const segments = itinerary?.segments || [];
-    const firstSegment = segments[0];
-    const lastSegment = segments[segments.length - 1];
-
-    return (
-      <div className="flight-card">
-        <div className="flight-header">
-          <h4>{title} Option {index + 1}</h4>
-          <div className="flight-price">
-            {flight.price?.total} {flight.price?.currency}
-          </div>
-        </div>
-        
-        <div className="flight-summary">
-          <div className="route-info">
-            <div className="airport">
-              <div className="code">{firstSegment?.departure?.iataCode}</div>
-              <div className="time">{formatTime(firstSegment?.departure?.at)}</div>
-              <div className="date">{formatDate(firstSegment?.departure?.at)}</div>
-            </div>
-            
-            <div className="duration-info">
-              <div className="duration">{formatDuration(itinerary?.duration)}</div>
-              <div className="stops">
-                {segments.length === 1 ? "Non-stop" : `${segments.length - 1} stop${segments.length - 1 > 1 ? 's' : ''}`}
-              </div>
-              <div className="route-line"></div>
-            </div>
-            
-            <div className="airport">
-              <div className="code">{lastSegment?.arrival?.iataCode}</div>
-              <div className="time">{formatTime(lastSegment?.arrival?.at)}</div>
-              <div className="date">{formatDate(lastSegment?.arrival?.at)}</div>
-            </div>
-          </div>
-        </div>
-        
-        <div className="flight-details">
-          {segments.map((segment, idx) => (
-            <div key={idx} className="segment">
-              <div className="segment-header">
-                <span className="carrier">{segment.carrierCode}{segment.number}</span>
-                <span className="aircraft">{segment.aircraft?.code || '—'}</span>
-              </div>
-              <div className="segment-route">
-                <div className="segment-point">
-                  <div className="point-time">{formatTime(segment.departure.at)}</div>
-                  <div className="point-code">{segment.departure.iataCode}</div>
-                </div>
-                <div className="segment-duration">
-                  {formatDuration(segment.duration)}
-                </div>
-                <div className="segment-point arrival">
-                  <div className="point-time">{formatTime(segment.arrival.at)}</div>
-                  <div className="point-code">{segment.arrival.iataCode}</div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
+  const handleCardClick = (flight) => {
+    setSelectedFlight(flight);
+    setIsModalOpen(true);
   };
 
-  const sendMessage = async () => {
-    if (!input.trim() || loading) return;
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setSelectedFlight(null);
+  };
 
-    const query = input;
-    setInput("");
-    setLoading(true);
-    setFlightResults(null);
+  const handleResetSession = () => {
+    localStorage.removeItem("flight_session_id");
+    sessionId.current = `sess-${crypto.randomUUID()}`;
+    localStorage.setItem("flight_session_id", sessionId.current);
+    // Clear State
+    setChatHistory([]);
+    setSavedFlights([]);
+    setErrorObj(null);
+    localStorage.removeItem(`flo_sess_${sessionId.current}`); // Clear DB for this session
+    window.location.reload();
+  };
 
-    const userMessage = {
-      role: "user",
-      text: query,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
+  const handleLoadSession = (planId) => {
+    if (planId === sessionId.current) return;
+    localStorage.setItem("flight_session_id", planId);
+    window.location.reload();
+  };
 
-    setMessages(prev => [...prev, userMessage]);
-    
-    const thinkingMessage = {
-      role: "assistant",
-      text: "Searching for available flights...",
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      isThinking: true
-    };
-    
-    setMessages(prev => [...prev, thinkingMessage]);
+  const handleSearch = async (query) => {
+    if (!query.trim() || isLoading) return;
+
+    setIsLoading(true);
+
+    // Add User Message
+    const userMsg = { role: 'user', text: query, id: Date.now() };
+    const updatedHistory = [...chatHistory, userMsg];
+    setChatHistory(updatedHistory);
+    saveSessionState({ chatHistory: updatedHistory });
 
     try {
-      const res = await fetch(API_URL, {
+      // Use the new Lambda endpoint format
+      const response = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userQuery: query })
+        body: JSON.stringify({
+          message: query,
+          sessionId: sessionId.current
+        }),
       });
 
-      const raw = await res.json();
-      const data = typeof raw.body === "string" ? JSON.parse(raw.body) : raw;
-
-      // Remove thinking message
-      setMessages(prev => prev.filter(msg => !msg.isThinking));
-      setLoading(false);
-
-      if (data.type === "chat") {
-        const responseMessage = {
-          role: "assistant",
-          text: data.message,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
-        setMessages(prev => [...prev, responseMessage]);
-        return;
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      if (data.type === "results") {
-        setFlightResults(data);
-        
-        const responseMessage = {
-          role: "assistant",
-          text: `Found ${data.outbound.length} flight options${data.tripType === 'round_trip' ? ` with ${data.return.length} return options` : ''}. Here are the best matches:`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          isFlightResults: true
-        };
-        
-        setMessages(prev => [...prev, responseMessage]);
-        return;
-      }
+      const data = await response.json();
 
-      // Fallback
-      setMessages(prev => [
-        ...prev,
-        {
-          role: "assistant",
-          text: "I apologize, but I couldn't process your request. Please try rephrasing your search criteria.",
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      // Parse the body if it's a string
+      let body = data;
+      if (data.body && typeof data.body === "string") {
+        try {
+          body = JSON.parse(data.body);
+        } catch (e) {
+          console.error("Failed to parse body:", e);
+          body = data;
         }
-      ]);
+      }
+
+      console.log("API Response:", body); // Debug log
+
+      if (body.type === "chat") {
+        // Handle chat-only response
+        const botMsg = {
+          role: 'bot',
+          id: Date.now() + 1,
+          results: [],
+          meta: {},
+          message: body.message || "I couldn't find any flights."
+        };
+        const newHistory = [...updatedHistory, botMsg];
+        setChatHistory(newHistory);
+        saveSessionState({ chatHistory: newHistory });
+
+      } else if (body.type === "results") {
+        // Handle flight results
+        const params = body.params || {};
+        const offers = body.offers || [];
+
+        // Extract origin and destination from params or first offer
+        const origin = params.origin || (offers.length > 0 ? offers[0].origin : null);
+        const destination = params.destination || (offers.length > 0 ? offers[0].destination : null);
+
+        if (origin && destination) {
+          updatePlanHistory(origin, destination);
+        }
+
+        // Group offers by offerId to pair round-trip legs
+        let finalResults = [];
+
+        if (Array.isArray(offers) && offers.length > 0) {
+          const groupedByOffer = offers.reduce((acc, offer) => {
+            const key = offer.offerId || offer.id;
+            if (!acc[key]) acc[key] = [];
+            acc[key].push(offer);
+            return acc;
+          }, {});
+
+          finalResults = Object.values(groupedByOffer).map(group => {
+            // If we have two legs with the same offerId, treat as round trip
+            if (group.length === 2) {
+              const outboundLeg = group.find(o => o.journeyType === "outbound") || group[0];
+              const returnLeg = group.find(o => o.journeyType === "return") || group[1];
+
+              return {
+                id: outboundLeg.offerId || outboundLeg.id,
+                type: "round_trip",
+                outbound: mapOfferToFlight(outboundLeg, "outbound"),
+                returnFlight: mapOfferToFlight(returnLeg, "return"),
+                price: {
+                  amount: outboundLeg.price || outboundLeg.totalPrice || 0,
+                  currency: outboundLeg.currency || "USD"
+                },
+                stops: Math.max(outboundLeg.stops || 0, returnLeg.stops || 0),
+                durationMinutes: (outboundLeg.durationMinutes || 0) + (returnLeg.durationMinutes || 0),
+                airline: outboundLeg.airline === returnLeg.airline ? outboundLeg.airline : "Multiple Airlines"
+              };
+            }
+
+            // Fallback for one-way or other types
+            const single = group[0];
+            const mapped = mapOfferToFlight(single);
+            return {
+              ...mapped,
+              id: single.offerId || single.id,
+              type: "one_way"
+            };
+          });
+        }
+
+        // Add Bot Message with results
+        const botMsg = {
+          role: 'bot',
+          id: Date.now() + 1,
+          results: finalResults,
+          meta: params,
+          message: body.message // Use Lambda's formatted message directly
+        };
+
+        const newHistory = [...updatedHistory, botMsg];
+        setChatHistory(newHistory);
+        saveSessionState({ chatHistory: newHistory });
+
+      } else {
+        // Handle error or unknown response type
+        const botMsg = {
+          role: 'bot',
+          id: Date.now() + 1,
+          results: [],
+          meta: {},
+          message: body.error || body.message || "I couldn't find any flights."
+        };
+        const newHistory = [...updatedHistory, botMsg];
+        setChatHistory(newHistory);
+        saveSessionState({ chatHistory: newHistory });
+      }
+
     } catch (err) {
-      console.error(err);
-      setMessages(prev => prev.filter(msg => !msg.isThinking));
-      setLoading(false);
-      setMessages(prev => [
-        ...prev,
-        {
-          role: "assistant",
-          text: "I apologize for the inconvenience. There was an issue connecting to our flight search service. Please try again in a moment.",
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }
-      ]);
+      console.error("Search error:", err);
+      const errorMsg = {
+        role: 'bot',
+        id: Date.now() + 1,
+        results: [],
+        message: "Something went wrong. Please try again."
+      };
+      const newHistory = [...updatedHistory, errorMsg];
+      setChatHistory(newHistory);
+      saveSessionState({ chatHistory: newHistory });
+      setErrorObj(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const renderMessage = (msg) => {
+    if (msg.role === 'user') {
+      return (
+        <div key={msg.id} className="user-message-container">
+          <div className="user-avatar-small">👤</div>
+          <div className="user-message-bubble">
+            {msg.text}
+          </div>
+        </div>
+      );
+    } else {
+      return (
+        <BotMessageBubble
+          key={msg.id}
+          msg={msg}
+          savedFlights={savedFlights}
+          onToggleSave={handleToggleSave}
+          onCardClick={handleCardClick}
+        />
+      );
     }
   };
 
   return (
-    <div className="app-container">
-      <header className="app-header">
-        <div className="header-content">
-          <h1>Flight Assistant</h1>
-          <p className="subtitle">AI-powered flight search and recommendations</p>
-        </div>
-      </header>
+    <div className="app-layout">
+      <Sidebar
+        onReset={handleResetSession}
+        plans={recentPlans}
+        onLoadPlan={handleLoadSession}
+      />
 
       <main className="main-content">
-        <div className="chat-section">
-          <div className="chat-container">
-            {messages.map((msg, idx) => (
-              <div key={idx} className={`message-bubble ${msg.role}`}>
-                <div className="message-header">
-                  <span className="message-role">
-                    {msg.role === 'assistant' ? 'Flight Assistant' : 'You'}
-                  </span>
-                  <span className="message-time">{msg.timestamp}</span>
-                </div>
-                <div className="message-content">
-                  {msg.text}
-                </div>
-              </div>
-            ))}
-            
-            {flightResults && (
-              <div className="flight-results-section">
-                <div className="results-header">
-                  <h3>Available Flights</h3>
-                  <span className="results-count">
-                    {flightResults.outbound.length} options
-                  </span>
-                </div>
-                
-                <div className="flights-container">
-                  <div className="outbound-flights">
-                    <h4 className="flight-group-title">
-                      {flightResults.tripType === 'round_trip' ? '🛫 Outbound Flights' : '✈ Available Flights'}
-                    </h4>
-                    {flightResults.outbound.map((flight, index) => (
-                      <FlightCard
-                        key={index}
-                        flight={flight}
-                        index={index}
-                        title={flightResults.tripType === 'round_trip' ? 'Outbound' : 'Flight'}
-                      />
-                    ))}
-                  </div>
-                  
-                  {flightResults.tripType === 'round_trip' && flightResults.return && (
-                    <div className="return-flights">
-                      <h4 className="flight-group-title">🛬 Return Flights</h4>
-                      {flightResults.return.map((flight, index) => (
-                        <FlightCard
-                          key={index}
-                          flight={flight}
-                          index={index}
-                          title="Return"
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            
-            <div ref={chatEndRef} />
-          </div>
-
-          <div className="input-container">
-            <div className="input-wrapper">
-              <input
-                ref={inputRef}
-                value={input}
-                placeholder="Try: 'Flights from New York to London next Friday' or 'Find the cheapest flight to Tokyo in March'"
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && sendMessage()}
-                disabled={loading}
-              />
-              <button 
-                onClick={sendMessage} 
-                disabled={loading || !input.trim()}
-                className="send-button"
-              >
-                {loading ? (
-                  <span className="loading-indicator">Searching...</span>
-                ) : (
-                  <span>Send</span>
-                )}
-              </button>
-            </div>
-            <div className="input-hints">
-              <span className="hint">Press Enter to send</span>
-              <span className="hint">•</span>
-              <span className="hint">Be specific for better results</span>
-            </div>
+        <div className="tabs-header">
+          <div className="pill-toggle">
+            <button
+              className={`pill-btn ${activeTab === 'planning' ? 'active' : ''}`}
+              onClick={() => setActiveTab('planning')}
+            >
+              Planning
+            </button>
+            <button
+              className={`pill-btn ${activeTab === 'saved' ? 'active' : ''}`}
+              onClick={() => setActiveTab('saved')}
+            >
+              Saved
+            </button>
           </div>
         </div>
-        
-        <div className="info-panel">
-          <h3>Search Tips</h3>
-          <ul className="tips-list">
-            <li>Include specific dates for more accurate results</li>
-            <li>Specify preferences like 'non-stop', 'cheapest', or 'morning flights'</li>
-            <li>Mention your departure city first, then destination</li>
-            <li>For round trips, include both departure and return dates</li>
-          </ul>
-          
-          <div className="quick-actions">
-            <h4>Quick Searches</h4>
-            <div className="action-buttons">
-              <button 
-                onClick={() => setInput("Cheapest flights to Paris next month")}
-                className="action-button"
-              >
-                Paris deals
-              </button>
-              <button 
-                onClick={() => setInput("Non-stop flights from LA to Tokyo")}
-                className="action-button"
-              >
-                Tokyo non-stop
-              </button>
-              <button 
-                onClick={() => setInput("Weekend trip to Chicago from NYC")}
-                className="action-button"
-              >
-                Weekend getaways
-              </button>
+
+        <div className="chat-stream">
+          {activeTab === 'planning' ? (
+            chatHistory.length === 0 ? (
+              <div className="hero-center">
+                <div className="hero-logo-large">✈️</div>
+                <h1 className="hero-title">Where to next?</h1>
+                <p className="hero-subtitle">Tell me your travel plans and I'll find the perfect flights for you</p>
+
+                <div className="suggestions-label">Start with a suggestion</div>
+                <div className="suggestion-cards-grid">
+                  <button
+                    className="suggestion-card"
+                    onClick={() => handleSearch("Find flights from Addis Ababa to Dubai tomorrow cheapest")}
+                  >
+                    <div className="suggestion-icon-wrapper urgency">
+                      <span className="suggestion-icon">⚡</span>
+                    </div>
+                    <div className="suggestion-content">
+                      <span className="suggestion-title">Last Minute Deal</span>
+                      <span className="suggestion-desc">Cheapest to Dubai tomorrow</span>
+                    </div>
+                  </button>
+
+                  <button
+                    className="suggestion-card"
+                    onClick={() => handleSearch("Flights from London to Paris next Monday")}
+                  >
+                    <div className="suggestion-icon-wrapper planning">
+                      <span className="suggestion-icon">🗓️</span>
+                    </div>
+                    <div className="suggestion-content">
+                      <span className="suggestion-title">Plan Ahead</span>
+                      <span className="suggestion-desc">London to Paris next week</span>
+                    </div>
+                  </button>
+
+                  <button
+                    className="suggestion-card"
+                    onClick={() => handleSearch("Round trip from Nairobi to Jeddah next week")}
+                  >
+                    <div className="suggestion-icon-wrapper roundtrip">
+                      <span className="suggestion-icon">🔄</span>
+                    </div>
+                    <div className="suggestion-content">
+                      <span className="suggestion-title">Round Trip</span>
+                      <span className="suggestion-desc">Nairobi to Jeddah return</span>
+                    </div>
+                  </button>
+
+                  <button
+                    className="suggestion-card"
+                    onClick={() => handleSearch("Cheapest flights to anywhere next month")}
+                  >
+                    <div className="suggestion-icon-wrapper explore">
+                      <span className="suggestion-icon">🌍</span>
+                    </div>
+                    <div className="suggestion-content">
+                      <span className="suggestion-title">Explore</span>
+                      <span className="suggestion-desc">Cheapest to anywhere</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {chatHistory.map(renderMessage)}
+                {isLoading && (
+                  <div className="bot-message">
+                    <div className="bot-header">
+                      <div className="bot-avatar">✨</div>
+                      <div className="loading-container">
+                        <span className="loading-dots">
+                          <span className="dot">.</span>
+                          <span className="dot">.</span>
+                          <span className="dot">.</span>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )
+          ) : (
+            <div className="results-card-container" style={{ maxWidth: '800px', margin: '0 auto' }}>
+              {savedFlights.length === 0 && (
+                <div style={{ padding: '2rem', textAlign: 'center', color: '#666' }}>
+                  No saved flights yet. Search for flights and click the bookmark icon to save them.
+                </div>
+              )}
+              {savedFlights.map((item, i) => (
+                <FlightCard
+                  key={`saved-${i}`}
+                  flight={item}
+                  isSaved={true}
+                  onToggleSave={() => handleToggleSave(item)}
+                  onCardClick={handleCardClick}
+                />
+              ))}
             </div>
+          )}
+        </div>
+
+        <div className="input-area-fixed">
+          <div className="input-container-inner">
+            <SearchInput
+              onSearch={handleSearch}
+              isLoading={isLoading}
+              placeholder={chatHistory.length === 0 ? "Try: 'Flights from Addis Ababa to Dubai tomorrow cheapest'" : "Ask follow up or refine your search..."}
+            />
+            {/* Error display removed as requested */}
           </div>
         </div>
       </main>
+
+      {/* Flight Details Modal */}
+      <FlightDetailsModal
+        flight={selectedFlight}
+        isOpen={isModalOpen}
+        onClose={handleCloseModal}
+      />
     </div>
   );
 }
 
-export default App;
+// --- Filter Helper ---
+const applyFilters = (results, filterType, filters) => {
+  let output = [...results];
+
+  // 1. Apply user filters
+  if (filters) {
+    if (filters.maxStops !== 'all') {
+      output = output.filter(r => {
+        const stops = r.type === 'round_trip'
+          ? Math.max(r.outbound?.stops || 0, r.returnFlight?.stops || 0)
+          : r.stops || 0;
+        return stops <= filters.maxStops;
+      });
+    }
+    if (filters.maxPrice !== 'all') {
+      output = output.filter(r => r.price?.amount <= filters.maxPrice);
+    }
+  }
+
+  // 2. Apply sorting
+  switch (filterType) {
+    case 'cheapest':
+      output.sort((a, b) => (a.price?.amount || Infinity) - (b.price?.amount || Infinity));
+      break;
+    case 'fastest':
+      output.sort((a, b) => (a.durationMinutes || Infinity) - (b.durationMinutes || Infinity));
+      break;
+    case 'best':
+    default:
+      // Weighted score: price (60%) + duration (40%)
+      const getScore = (item) => {
+        const price = item.price?.amount || 0;
+        const duration = item.durationMinutes || 0;
+        return (price * 0.6) + (duration * 0.4);
+      };
+      output.sort((a, b) => getScore(a) - getScore(b));
+      break;
+  }
+
+  return output;
+};
+
+// Sub-component for Bot Message to handle "Show more" state locally
+const BotMessageBubble = ({ msg, savedFlights, onToggleSave, onCardClick }) => {
+  const [expanded, setExpanded] = useState(false);
+  const [sortType, setSortType] = useState('cheapest');
+  const [localFilters, setLocalFilters] = useState({ maxStops: 'all', maxPrice: 'all' });
+
+  if (!msg.results || msg.results.length === 0) {
+    return (
+      <div className="bot-message">
+        <div className="bot-header">
+          <div className="bot-avatar">✨</div>
+          <span>{msg.message}</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Extract only the conversational header from the message
+  const getConversationalHeader = (message) => {
+    if (!message) return "Here are your flights:";
+
+    // Take everything before the first numbered item or emoji flight listing
+    const lines = message.split('\n');
+    let header = [];
+
+    for (const line of lines) {
+      // Stop at flight listings
+      if (line.match(/^\d+\./) || line.includes('**') || line.includes('💰') || line.includes('🛫')) {
+        break;
+      }
+      if (line.trim()) {
+        header.push(line.trim());
+      }
+    }
+
+    return header.length > 0 ? header.join(' ') : "Here are your flights:";
+  };
+
+  // Apply Local Sort/Filter
+  const processedResults = useMemo(() => {
+    return applyFilters(msg.results, sortType, localFilters);
+  }, [msg.results, sortType, localFilters]);
+
+  const visibleResults = expanded ? processedResults : processedResults.slice(0, 3);
+  const hiddenCount = processedResults.length - visibleResults.length;
+
+  // Calculate min values for highlighting
+  const minPrice = useMemo(() => {
+    return Math.min(...msg.results.map(r => r.price?.amount || Infinity));
+  }, [msg.results]);
+
+  const minDuration = useMemo(() => {
+    return Math.min(...msg.results.map(r => r.durationMinutes || Infinity));
+  }, [msg.results]);
+
+  const handleFilterChange = (key, value) => {
+    setLocalFilters(prev => ({ ...prev, [key]: value }));
+  };
+
+  return (
+    <div className="bot-message">
+      {/* Header */}
+      <div className="bot-header">
+        <div className="bot-avatar">✨</div>
+        <div className="bot-message-content">
+          <span>{getConversationalHeader(msg.message)}</span>
+          {msg.meta && Object.keys(msg.meta).length > 0 && (
+            <div className="meta-tags">
+              {msg.meta.origin && msg.meta.destination && (
+                <span className="meta-tag">
+                  {msg.meta.origin} → {msg.meta.destination}
+                </span>
+              )}
+              {msg.meta.departure_date && (
+                <span className="meta-tag">
+                  📅 {msg.meta.departure_date}
+                </span>
+              )}
+              {msg.meta.trip_type === 'round_trip' && msg.meta.return_date && (
+                <span className="meta-tag">
+                  🔄 {msg.meta.return_date}
+                </span>
+              )}
+              {msg.meta.filter && (
+                <span className="meta-tag">
+                  🔍 {msg.meta.filter}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Filters UI - Only show if we have results */}
+      {processedResults.length > 0 && (
+        <div className="inline-filters-container">
+          <Filters
+            filters={localFilters}
+            onFilterChange={handleFilterChange}
+            sortType={sortType}
+            onSortChange={setSortType}
+            minPrice={0}
+            maxPrice={Math.max(...msg.results.map(r => r.price?.amount || 0))}
+          />
+        </div>
+      )}
+
+      {/* Results Card */}
+      <div className="results-card-container">
+        <div className="results-content-inner">
+          {visibleResults.length === 0 ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: '#666' }}>
+              No flights match these filters. Try adjusting your filter settings.
+            </div>
+          ) : (
+            visibleResults.map((item, i) => (
+              <FlightCard
+                key={`${msg.id}-${item.id}-${i}`}
+                flight={item}
+                isSaved={savedFlights.some(f => f.id === item.id)}
+                onToggleSave={() => onToggleSave(item)}
+                onCardClick={onCardClick}
+                minPrice={minPrice}
+                minDuration={minDuration}
+              />
+            ))
+          )}
+        </div>
+
+        {!expanded && hiddenCount > 0 && (
+          <button className="show-more-btn" onClick={() => setExpanded(true)}>
+            Show {hiddenCount} more flight{hiddenCount !== 1 ? 's' : ''} <span>▼</span>
+          </button>
+        )}
+        {expanded && processedResults.length > 3 && (
+          <button className="show-more-btn" onClick={() => setExpanded(false)}>
+            Show less <span>▲</span>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
