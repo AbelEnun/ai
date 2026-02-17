@@ -2,7 +2,7 @@
  * Sidebar Component - Kayak AI Style
  * Navigation sidebar with branding, new plan action, and plan history
  */
-const Sidebar = ({ onReset, plans = [], onLoadPlan }) => {
+const Sidebar = ({ onReset, plans = [], onLoadPlan, theme, toggleTheme, onToggleSidebar }) => {
     const handlePlanClick = (planId) => {
         if (onLoadPlan) {
             onLoadPlan(planId);
@@ -21,6 +21,20 @@ const Sidebar = ({ onReset, plans = [], onLoadPlan }) => {
                     </div>
                     <span className="logo-text">SkyScout</span>
                 </div>
+                {/* Hamburger Toggle */}
+                {onToggleSidebar && (
+                    <button
+                        className="hamburger-btn-inline"
+                        onClick={onToggleSidebar}
+                        aria-label="Hide sidebar"
+                    >
+                        <div className="hamburger-icon">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </div>
+                    </button>
+                )}
             </div>
 
             {/* New Plan Button */}
@@ -67,7 +81,7 @@ const Sidebar = ({ onReset, plans = [], onLoadPlan }) => {
                 </ul>
             </div>
 
-            {/* User Profile Footer */}
+            {/* Footer with User Profile */}
             <div className="sidebar-footer">
                 <div className="user-profile">
                     <div className="user-avatar" aria-hidden="true">

@@ -86,6 +86,9 @@ export default function App() {
   const [filters, setFilters] = useState({ maxStops: 'all', maxPrice: 'all' });
   const [selectedFlight, setSelectedFlight] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [sidebarVisible, setSidebarVisible] = useState(true);
+
+
 
   // Load Global Plans
   useEffect(() => {
@@ -107,6 +110,75 @@ export default function App() {
         if (data.filters) setFilters(data.filters);
       } catch (e) { console.error(e); }
     }
+  }, []);
+
+  /* Removed bottomRef and isAtBottomRef */
+  const chatContainerRef = useRef(null);
+
+  /* handleScroll removed as it's handled inside useEffect now */
+
+  // Robust Auto-scroll
+  // Improved auto-scroll
+  useEffect(() => {
+    if (activeTab !== 'planning') return;
+
+    const container = chatContainerRef.current;
+    if (!container) return;
+
+    const shouldScrollToBottom = () => {
+      // Always scroll on new user messages or when loading
+      const lastMsg = chatHistory[chatHistory.length - 1];
+      if (lastMsg?.role === 'user' || isLoading) return true;
+
+      // Scroll if user was already at bottom
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 150;
+      return isNearBottom;
+    };
+
+    if (shouldScrollToBottom()) {
+      // Use requestAnimationFrame for smoother scrolling
+      requestAnimationFrame(() => {
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior: 'smooth'
+        });
+      });
+    }
+  }, [chatHistory, isLoading, activeTab]);
+
+  // Add touch event handling
+  useEffect(() => {
+    const handleTouchMove = (e) => {
+      // Prevent pull-to-refresh when at top of chat
+      if (chatContainerRef.current && chatContainerRef.current.scrollTop <= 0) {
+        e.preventDefault();
+      }
+    };
+
+    const container = chatContainerRef.current;
+    if (container) {
+      container.addEventListener('touchmove', handleTouchMove, { passive: false });
+    }
+
+    return () => {
+      if (container) {
+        container.removeEventListener('touchmove', handleTouchMove);
+      }
+    };
+  }, []);
+
+  // Add viewport height fix for mobile browsers
+  useEffect(() => {
+    const setVh = () => {
+      const vh = window.innerHeight * 0.01;
+      document.documentElement.style.setProperty('--vh', `${vh}px`);
+    };
+
+    setVh();
+    window.addEventListener('resize', setVh);
+
+    return () => window.removeEventListener('resize', setVh);
   }, []);
 
   // Save Session Helper
@@ -347,13 +419,30 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      <Sidebar
-        onReset={handleResetSession}
-        plans={recentPlans}
-        onLoadPlan={handleLoadSession}
-      />
+      {sidebarVisible && (
+        <Sidebar
+          onReset={handleResetSession}
+          plans={recentPlans}
+          onLoadPlan={handleLoadSession}
+          onToggleSidebar={() => setSidebarVisible(false)}
+        />
+      )}
 
       <main className="main-content">
+        {/* Show hamburger only when sidebar is hidden */}
+        {!sidebarVisible && (
+          <button
+            className="hamburger-btn-floating"
+            onClick={() => setSidebarVisible(true)}
+            aria-label="Show sidebar"
+          >
+            <div className="hamburger-icon">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+          </button>
+        )}
         <div className="tabs-header">
           <div className="pill-toggle">
             <button
@@ -371,11 +460,13 @@ export default function App() {
           </div>
         </div>
 
-        <div className="chat-stream">
+        <div
+          className="chat-stream"
+          ref={chatContainerRef}
+        >
           {activeTab === 'planning' ? (
             chatHistory.length === 0 ? (
               <div className="hero-center">
-                <div className="hero-logo-large">✈️</div>
                 <h1 className="hero-title">Where to next?</h1>
                 <p className="hero-subtitle">Tell me your travel plans and I'll find the perfect flights for you</p>
 
@@ -451,6 +542,7 @@ export default function App() {
                     </div>
                   </div>
                 )}
+                {/* Scroll anchor removed, using container scroll */}
               </>
             )
           ) : (
