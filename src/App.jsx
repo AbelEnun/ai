@@ -87,7 +87,18 @@ export default function App() {
   const [selectedFlight, setSelectedFlight] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    return localStorage.getItem('flo_dark_mode') === 'true';
+  });
 
+  // Persist dark mode and apply class on toggle
+  const handleToggleDark = () => {
+    setIsDarkMode(prev => {
+      const next = !prev;
+      localStorage.setItem('flo_dark_mode', String(next));
+      return next;
+    });
+  };
 
 
   // Load Global Plans
@@ -223,21 +234,45 @@ export default function App() {
   };
 
   const handleResetSession = () => {
-    localStorage.removeItem("flight_session_id");
-    sessionId.current = `sess-${crypto.randomUUID()}`;
-    localStorage.setItem("flight_session_id", sessionId.current);
-    // Clear State
+    // Generate new session ID without reloading
+    const oldSessId = sessionId.current;
+    const newSessId = `sess-${crypto.randomUUID()}`;
+    sessionId.current = newSessId;
+    localStorage.setItem("flight_session_id", newSessId);
+    // Clear State instantly
     setChatHistory([]);
     setSavedFlights([]);
+    setFilters({ maxStops: 'all', maxPrice: 'all' });
     setErrorObj(null);
-    localStorage.removeItem(`flo_sess_${sessionId.current}`); // Clear DB for this session
-    window.location.reload();
   };
 
   const handleLoadSession = (planId) => {
     if (planId === sessionId.current) return;
-    localStorage.setItem("flight_session_id", planId);
-    window.location.reload();
+    // Load the session data from localStorage without reloading
+    const storedSession = localStorage.getItem(`flo_sess_${planId}`);
+    if (storedSession) {
+      try {
+        const data = JSON.parse(storedSession);
+        sessionId.current = planId;
+        localStorage.setItem("flight_session_id", planId);
+        setChatHistory(data.chatHistory || []);
+        setSavedFlights(data.savedFlights || []);
+        setFilters(data.filters || { maxStops: 'all', maxPrice: 'all' });
+        setErrorObj(null);
+        setActiveTab('planning');
+      } catch (e) { console.error(e); }
+    }
+  };
+
+  const handleDeletePlan = (planId, e) => {
+    e.stopPropagation();
+    setRecentPlans(prev => {
+      const updated = prev.filter(p => p.id !== planId);
+      localStorage.setItem("flo_recent_plans", JSON.stringify(updated));
+      return updated;
+    });
+    // Also remove the session data
+    localStorage.removeItem(`flo_sess_${planId}`);
   };
 
   const handleSearch = async (query) => {
@@ -418,12 +453,14 @@ export default function App() {
   };
 
   return (
-    <div className="app-layout">
+    <div className={`app-layout${isDarkMode ? ' dark' : ''}`}>
       {sidebarVisible && (
         <Sidebar
           onReset={handleResetSession}
           plans={recentPlans}
           onLoadPlan={handleLoadSession}
+          onDeletePlan={handleDeletePlan}
+          currentPlanId={sessionId.current}
           onToggleSidebar={() => setSidebarVisible(false)}
         />
       )}
@@ -458,6 +495,20 @@ export default function App() {
               Saved
             </button>
           </div>
+
+          {/* Dark Mode Toggle */}
+          <button
+            id="theme-toggle-btn"
+            className="theme-toggle-btn"
+            onClick={handleToggleDark}
+            aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+            title={isDarkMode ? 'Light mode' : 'Dark mode'}
+          >
+            <div className={`theme-toggle-track${isDarkMode ? ' on' : ''}`}>
+              <div className="theme-toggle-thumb" />
+            </div>
+            {isDarkMode ? '🌙 Dark' : '☀️ Light'}
+          </button>
         </div>
 
         <div

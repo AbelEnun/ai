@@ -1,8 +1,8 @@
 /**
- * Sidebar Component - Kayak AI Style
- * Navigation sidebar with branding, new plan action, and plan history
+ * Sidebar Component - SkyScout
+ * Navigation sidebar with branding, new plan action, and scrollable deletable plan history
  */
-const Sidebar = ({ onReset, plans = [], onLoadPlan, theme, toggleTheme, onToggleSidebar }) => {
+const Sidebar = ({ onReset, plans = [], onLoadPlan, onDeletePlan, currentPlanId, theme, toggleTheme, onToggleSidebar }) => {
     const handlePlanClick = (planId) => {
         if (onLoadPlan) {
             onLoadPlan(planId);
@@ -55,13 +55,14 @@ const Sidebar = ({ onReset, plans = [], onLoadPlan, theme, toggleTheme, onToggle
                 <ul className="plans-list" role="list">
                     {plans.length === 0 ? (
                         <li className="plan-item plan-item-empty" aria-label="No recent plans">
-                            No recent plans
+                            <span className="plan-empty-icon">🗺️</span>
+                            <span>No recent plans yet</span>
                         </li>
                     ) : (
                         plans.map((plan) => (
                             <li
                                 key={plan.id}
-                                className="plan-item"
+                                className={`plan-item ${plan.id === currentPlanId ? 'plan-item-active' : ''}`}
                                 onClick={() => handlePlanClick(plan.id)}
                                 role="button"
                                 tabIndex={0}
@@ -72,9 +73,24 @@ const Sidebar = ({ onReset, plans = [], onLoadPlan, theme, toggleTheme, onToggle
                                     }
                                 }}
                                 aria-label={`Load plan: ${plan.route} from ${plan.date}`}
+                                aria-current={plan.id === currentPlanId ? 'true' : undefined}
                             >
-                                <span className="plan-route">{plan.route}</span>
-                                <span className="plan-date">{plan.date}</span>
+                                <div className="plan-item-content">
+                                    <span className="plan-route">{plan.route}</span>
+                                    <span className="plan-date">{plan.date}</span>
+                                </div>
+                                {onDeletePlan && (
+                                    <button
+                                        className="plan-delete-btn"
+                                        onClick={(e) => onDeletePlan(plan.id, e)}
+                                        aria-label={`Delete plan: ${plan.route}`}
+                                        title="Delete plan"
+                                    >
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                                        </svg>
+                                    </button>
+                                )}
                             </li>
                         ))
                     )}
