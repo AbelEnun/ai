@@ -192,6 +192,19 @@ export default function App() {
     return () => window.removeEventListener('resize', setVh);
   }, []);
 
+  // Keep the visual theme consistent by applying the `dark` class
+  // to the root HTML element when dark mode is active. This ensures
+  // CSS variables under `.dark` affect the whole page and prevents
+  // white gaps/strips when toggling themes.
+  useEffect(() => {
+    try {
+      if (isDarkMode) document.documentElement.classList.add('dark');
+      else document.documentElement.classList.remove('dark');
+    } catch (e) {
+      console.error('Failed to toggle root dark class', e);
+    }
+  }, [isDarkMode]);
+
   // Save Session Helper
   const saveSessionState = (newData) => {
     const sessId = sessionId.current;
