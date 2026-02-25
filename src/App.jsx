@@ -55,6 +55,11 @@ const mapOfferToFlight = (offer, journeyType = "outbound") => {
     durationMinutes: durationMinutes,
     journeyType: journeyType,
     cached: offer.cached || offer.provider === "cached",
+    // 🔥 NEW: Round trip fields
+    trip_type: offer.trip_type || "one_way",
+    return_date: offer.return_date,
+    returnDepartureTime: offer.returnDepartureTime || offer.returnDeparture,
+    outboundDeparture: offer.outboundDeparture || offer.departureTime,
     // Keep original for reference
     _raw: offer
   };
@@ -344,72 +349,113 @@ export default function App() {
 
       } else if (body.type === "results") {
         // Handle flight results
-        const params = body.params || {};
-        const offers = body.offers || [];
+  const params = body.params || {};
+  const offers = body.offers || [];
 
-        // Extract origin and destination from params or first offer
-        const origin = params.origin || (offers.length > 0 ? offers[0].origin : null);
-        const destination = params.destination || (offers.length > 0 ? offers[0].destination : null);
+  // Extract origin and destination from params or first offer
+  const origin = params.origin || (offers.length > 0 ? offers[0].origin : null);
+  const destination = params.destination || (offers.length > 0 ? offers[0].destination : null);
 
-        if (origin && destination) {
-          updatePlanHistory(origin, destination);
-        }
+  if (origin && destination) {
+    updatePlanHistory(origin, destination);
+  }
 
-        // Group offers by offerId to pair round-trip legs
-        let finalResults = [];
+  let finalResults = [];
 
-        if (Array.isArray(offers) && offers.length > 0) {
-          const groupedByOffer = offers.reduce((acc, offer) => {
-            const key = offer.offerId || offer.id;
-            if (!acc[key]) acc[key] = [];
-            acc[key].push(offer);
-            return acc;
-          }, {});
-
-          finalResults = Object.values(groupedByOffer).map(group => {
-            // If we have two legs with the same offerId, treat as round trip
-            if (group.length === 2) {
-              const outboundLeg = group.find(o => o.journeyType === "outbound") || group[0];
-              const returnLeg = group.find(o => o.journeyType === "return") || group[1];
-
-              return {
-                id: outboundLeg.offerId || outboundLeg.id,
-                type: "round_trip",
-                outbound: mapOfferToFlight(outboundLeg, "outbound"),
-                returnFlight: mapOfferToFlight(returnLeg, "return"),
-                price: {
-                  amount: outboundLeg.price || outboundLeg.totalPrice || 0,
-                  currency: outboundLeg.currency || "USD"
-                },
-                stops: Math.max(outboundLeg.stops || 0, returnLeg.stops || 0),
-                durationMinutes: (outboundLeg.durationMinutes || 0) + (returnLeg.durationMinutes || 0),
-                airline: outboundLeg.airline === returnLeg.airline ? outboundLeg.airline : "Multiple Airlines"
-              };
-            }
-
-            // Fallback for one-way or other types
-            const single = group[0];
-            const mapped = mapOfferToFlight(single);
-            return {
+  if (Array.isArray(offers) && offers.length > 0) {
+    // 🔥 NEW: Check if offers are already formatted as round trips
+    const hasRoundTrips = offers.some(o => o.trip_type === "round_trip");
+    
+    if (hasRoundTrips) {
+      // Backend already formatted round trips properly
+      finalResults = offers.map(offer => {
+        const mapped = mapOfferToFlight(offer);
+        
+        if (offer.trip_type === "round_trip") {
+          return {
+            ...mapped,
+            id: offer.offerId || offer.id,
+            type: "round_trip",
+            outbound: {
               ...mapped,
-              id: single.offerId || single.id,
-              type: "one_way"
-            };
-          });
+              departureTime: offer.outboundDeparture || offer.departureTime,
+              journeyType: "outbound"
+            },
+            returnFlight: {
+              ...mapped,
+              departureTime: offer.returnDepartureTime || offer.returnDeparture,
+              journeyType: "return"
+            },
+            price: {
+              amount: offer.price || offer.totalPrice || 0,
+              currency: offer.currency || "USD"
+            },
+            stops: offer.stops || 0,
+            durationMinutes: offer.durationMinutes || 0,
+            airline: offer.airline || "Unknown"
+          };
+        }
+        return mapped;
+      });
+    } else {
+      // Fallback: Group offers by offerId to pair round-trip legs (original logic)
+      const groupedByOffer = offers.reduce((acc, offer) => {
+        const key = offer.offerId || offer.id;
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(offer);
+        return acc;
+      }, {});
+
+      finalResults = Object.values(groupedByOffer).map(group => {
+        // If we have two legs with the same offerId, treat as round trip
+        if (group.length === 2) {
+          const outboundLeg = group.find(o => o.journeyType === "outbound") || group[0];
+          const returnLeg = group.find(o => o.journeyType === "return") || group[1];
+
+          return {
+            id: outboundLeg.offerId || outboundLeg.id,
+            type: "round_trip",
+            outbound: mapOfferToFlight(outboundLeg, "outbound"),
+            returnFlight: mapOfferToFlight(returnLeg, "return"),
+            price: {
+              amount: outboundLeg.price || outboundLeg.totalPrice || 0,
+              currency: outboundLeg.currency || "USD"
+            },
+            stops: Math.max(outboundLeg.stops || 0, returnLeg.stops || 0),
+            durationMinutes: (outboundLeg.durationMinutes || 0) + (returnLeg.durationMinutes || 0),
+            airline: outboundLeg.airline === returnLeg.airline ? outboundLeg.airline : "Multiple Airlines"
+          };
         }
 
-        // Add Bot Message with results
-        const botMsg = {
-          role: 'bot',
-          id: Date.now() + 1,
-          results: finalResults,
-          meta: params,
-          message: body.message // Use Lambda's formatted message directly
+        // Fallback for one-way or other types
+        const single = group[0];
+        const mapped = mapOfferToFlight(single);
+        return {
+          ...mapped,
+          id: single.offerId || single.id,
+          type: "one_way"
         };
+      });
+    }
+  }
 
-        const newHistory = [...updatedHistory, botMsg];
-        setChatHistory(newHistory);
-        saveSessionState({ chatHistory: newHistory });
+  // Add Bot Message with results
+  const botMsg = {
+    role: 'bot',
+    id: Date.now() + 1,
+    results: finalResults,
+    meta: {
+      ...params,
+      // 🔥 Ensure round trip metadata is passed
+      trip_type: params.trip_type,
+      return_date: params.return_date
+    },
+    message: body.message // Use Lambda's formatted message directly
+  };
+
+  const newHistory = [...updatedHistory, botMsg];
+  setChatHistory(newHistory);
+  saveSessionState({ chatHistory: newHistory });
 
       } else {
         // Handle error or unknown response type
@@ -666,24 +712,39 @@ const applyFilters = (results, filterType, filters) => {
       });
     }
     if (filters.maxPrice !== 'all') {
-      output = output.filter(r => r.price?.amount <= filters.maxPrice);
+      output = output.filter(r => {
+        const price = r.type === 'round_trip' 
+          ? r.price?.amount || 0
+          : r.price?.amount || 0;
+        return price <= filters.maxPrice;
+      });
     }
   }
 
-  // 2. Apply sorting
+  // 2. Apply sorting with round trip awareness
   switch (filterType) {
     case 'cheapest':
       output.sort((a, b) => (a.price?.amount || Infinity) - (b.price?.amount || Infinity));
       break;
     case 'fastest':
-      output.sort((a, b) => (a.durationMinutes || Infinity) - (b.durationMinutes || Infinity));
+      output.sort((a, b) => {
+        const durationA = a.type === 'round_trip' 
+          ? (a.outbound?.durationMinutes || 0) + (a.returnFlight?.durationMinutes || 0)
+          : a.durationMinutes || Infinity;
+        const durationB = b.type === 'round_trip'
+          ? (b.outbound?.durationMinutes || 0) + (b.returnFlight?.durationMinutes || 0)
+          : b.durationMinutes || Infinity;
+        return durationA - durationB;
+      });
       break;
     case 'best':
     default:
       // Weighted score: price (60%) + duration (40%)
       const getScore = (item) => {
         const price = item.price?.amount || 0;
-        const duration = item.durationMinutes || 0;
+        const duration = item.type === 'round_trip'
+          ? (item.outbound?.durationMinutes || 0) + (item.returnFlight?.durationMinutes || 0)
+          : item.durationMinutes || 0;
         return (price * 0.6) + (duration * 0.4);
       };
       output.sort((a, b) => getScore(a) - getScore(b));
@@ -760,29 +821,37 @@ const BotMessageBubble = ({ msg, savedFlights, onToggleSave, onCardClick }) => {
         <div className="bot-message-content">
           <span>{getConversationalHeader(msg.message)}</span>
           {msg.meta && Object.keys(msg.meta).length > 0 && (
-            <div className="meta-tags">
-              {msg.meta.origin && msg.meta.destination && (
-                <span className="meta-tag">
-                  {msg.meta.origin} → {msg.meta.destination}
-                </span>
-              )}
-              {msg.meta.departure_date && (
-                <span className="meta-tag">
-                  📅 {msg.meta.departure_date}
-                </span>
-              )}
-              {msg.meta.trip_type === 'round_trip' && msg.meta.return_date && (
-                <span className="meta-tag">
-                  🔄 {msg.meta.return_date}
-                </span>
-              )}
-              {msg.meta.filter && (
-                <span className="meta-tag">
-                  🔍 {msg.meta.filter}
-                </span>
-              )}
-            </div>
-          )}
+  <div className="meta-tags">
+    {msg.meta.origin && msg.meta.destination && (
+      <span className="meta-tag">
+        {msg.meta.origin} → {msg.meta.destination}
+      </span>
+    )}
+    {msg.meta.departure_date && (
+      <span className="meta-tag">
+        📅 {msg.meta.departure_date}
+      </span>
+    )}
+    {/* 🔥 Improved round trip display */}
+    {msg.meta.trip_type === 'round_trip' && (
+      <>
+        {msg.meta.return_date && (
+          <span className="meta-tag">
+            🔄 Return: {msg.meta.return_date}
+          </span>
+        )}
+        <span className="meta-tag">
+          ✈️ Round Trip
+        </span>
+      </>
+    )}
+    {msg.meta.is_filtered_results && (
+      <span className="meta-tag">
+        🔍 Filtered Results
+      </span>
+    )}
+  </div>
+)}
         </div>
       </div>
 

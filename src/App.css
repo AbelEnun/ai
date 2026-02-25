@@ -866,9 +866,16 @@ body {
     flex-direction: column;
     align-items: flex-end;
     gap: 0.25rem;
+    position: relative; /* allow absolute badge positioning */
+    padding-top: 1.5rem; /* reserve top space so absolute badge doesn't overlap price text */
 }
 
 .badge-cheapest-top {
+    position: absolute;
+    top: 0.25rem;
+    right: 0;
+    transform: translateY(-50%);
+
     background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
     color: #047857;
     border: 1.5px solid #10b981;
@@ -882,6 +889,10 @@ body {
     box-shadow: 0 2px 8px rgba(16, 185, 129, 0.15);
 }
 
+/* ensure all cards have consistent minimum height */
+.flight-card-container {
+    min-height: 140px;
+}
 .price-text {
     font-size: 1.25rem;
     font-weight: 800;
@@ -2860,4 +2871,31 @@ body {
 
 .dark ::-webkit-scrollbar-thumb:hover {
     background: #475569;
+}
+
+/* Add to App.css for better round trip display */
+.meta-tag.round-trip {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.flight-card.round-trip {
+  border-left: 4px solid #667eea;
+}
+
+.round-trip-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: rgba(102, 126, 234, 0.1);
+  color: #667eea;
+}
+
+.dark .round-trip-badge {
+  background: rgba(102, 126, 234, 0.2);
+  color: #a0b0ff;
 }
