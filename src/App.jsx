@@ -130,37 +130,49 @@ export default function App() {
 
   /* Removed bottomRef and isAtBottomRef */
   const chatContainerRef = useRef(null);
+  const prevActiveTabRef = useRef(null);
+  const prevSessionIdRef = useRef(sessionId.current);
 
   /* handleScroll removed as it's handled inside useEffect now */
 
-  // Robust Auto-scroll
-  // Improved auto-scroll
+  // Robust Auto-scroll — always go to bottom when entering planning or loading a session
   useEffect(() => {
-    if (activeTab !== 'planning') return;
-
     const container = chatContainerRef.current;
-    if (!container) return;
-
-    const shouldScrollToBottom = () => {
-      // Always scroll on new user messages or when loading
-      const lastMsg = chatHistory[chatHistory.length - 1];
-      if (lastMsg?.role === 'user' || isLoading) return true;
-
-      // Scroll if user was already at bottom
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      const isNearBottom = scrollHeight - scrollTop - clientHeight < 150;
-      return isNearBottom;
-    };
-
-    if (shouldScrollToBottom()) {
-      // Use requestAnimationFrame for smoother scrolling
-      requestAnimationFrame(() => {
-        container.scrollTo({
-          top: container.scrollHeight,
-          behavior: 'smooth'
-        });
-      });
+    if (!container) {
+      prevActiveTabRef.current = activeTab;
+      prevSessionIdRef.current = sessionId.current;
+      return;
     }
+
+    const lastMsg = chatHistory[chatHistory.length - 1];
+
+    const switchedToPlanning = activeTab === 'planning' && prevActiveTabRef.current !== 'planning';
+    const sessionChanged = activeTab === 'planning' && sessionId.current !== prevSessionIdRef.current;
+
+    if (switchedToPlanning || sessionChanged) {
+      // Force scroll to bottom when user navigates into planning or a new session is loaded
+      requestAnimationFrame(() => {
+        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+      });
+    } else {
+      // Preserve previous smart auto-scroll behaviour
+      if (lastMsg?.role === 'user' || isLoading) {
+        requestAnimationFrame(() => {
+          container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+        });
+      } else {
+        const { scrollTop, scrollHeight, clientHeight } = container;
+        const isNearBottom = scrollHeight - scrollTop - clientHeight < 150;
+        if (isNearBottom) {
+          requestAnimationFrame(() => {
+            container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+          });
+        }
+      }
+    }
+
+    prevActiveTabRef.current = activeTab;
+    prevSessionIdRef.current = sessionId.current;
   }, [chatHistory, isLoading, activeTab]);
 
   // Add touch event handling
@@ -527,17 +539,32 @@ export default function App() {
       <main className="main-content">
         {/* Show hamburger only when sidebar is hidden */}
         {!sidebarVisible && (
-          <button
-            className="hamburger-btn-floating"
-            onClick={() => setSidebarVisible(true)}
-            aria-label="Show sidebar"
-          >
-            <div className="hamburger-icon">
-              <span></span>
-              <span></span>
-              <span></span>
-            </div>
-          </button>
+          <>
+            <button
+              className="hamburger-btn-floating"
+              onClick={() => setSidebarVisible(true)}
+              aria-label="Show sidebar"
+            >
+              <div className="hamburger-icon">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+            </button>
+
+            {/* floating new-plan icon when sidebar is hidden */}
+            <button
+              className="new-plan-btn new-plan-floating"
+              onClick={handleResetSession}
+              aria-label="Start a new travel plan"
+              title="New plan"
+            >
+              <svg className="plus-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M12 5V19M5 12H19" stroke="white" strokeWidth="3" strokeLinecap="round" />
+              </svg>
+              <span>Start a new plan</span>
+            </button>
+          </>
         )}
         <div className="tabs-header">
           <div className="pill-toggle">
@@ -723,6 +750,9 @@ const applyFilters = (results, filterType, filters) => {
 
   // 2. Apply sorting with round trip awareness
   switch (filterType) {
+    case 'default':
+      // keep backend order, do nothing
+      break;
     case 'cheapest':
       output.sort((a, b) => (a.price?.amount || Infinity) - (b.price?.amount || Infinity));
       break;
@@ -738,16 +768,20 @@ const applyFilters = (results, filterType, filters) => {
       });
       break;
     case 'best':
+      {
+        // Weighted score: price (60%) + duration (40%)
+        const getScore = (item) => {
+          const price = item.price?.amount || 0;
+          const duration = item.type === 'round_trip'
+            ? (item.outbound?.durationMinutes || 0) + (item.returnFlight?.durationMinutes || 0)
+            : item.durationMinutes || 0;
+          return (price * 0.6) + (duration * 0.4);
+        };
+        output.sort((a, b) => getScore(a) - getScore(b));
+      }
+      break;
     default:
-      // Weighted score: price (60%) + duration (40%)
-      const getScore = (item) => {
-        const price = item.price?.amount || 0;
-        const duration = item.type === 'round_trip'
-          ? (item.outbound?.durationMinutes || 0) + (item.returnFlight?.durationMinutes || 0)
-          : item.durationMinutes || 0;
-        return (price * 0.6) + (duration * 0.4);
-      };
-      output.sort((a, b) => getScore(a) - getScore(b));
+      // should not happen, but keep original order
       break;
   }
 
@@ -757,7 +791,7 @@ const applyFilters = (results, filterType, filters) => {
 // Sub-component for Bot Message to handle "Show more" state locally
 const BotMessageBubble = ({ msg, savedFlights, onToggleSave, onCardClick }) => {
   const [expanded, setExpanded] = useState(false);
-  const [sortType, setSortType] = useState('cheapest');
+  const [sortType, setSortType] = useState('default');
   const [localFilters, setLocalFilters] = useState({ maxStops: 'all', maxPrice: 'all' });
 
   if (!msg.results || msg.results.length === 0) {

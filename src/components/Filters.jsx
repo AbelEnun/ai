@@ -23,9 +23,10 @@ const Filters = ({ filters, onFilterChange, sortType, onSortChange }) => {
                         id="sort-select"
                         value={sortType}
                         onChange={(e) => onSortChange(e.target.value)}
-                        className="filter-select"
+                        className="filter-select-modern"
                         aria-label="Sort flights by"
                     >
+                        <option value="default">Default</option>
                         <option value="best">Best</option>
                         <option value="cheapest">Cheapest</option>
                         <option value="fastest">Fastest</option>
@@ -40,6 +41,7 @@ const Filters = ({ filters, onFilterChange, sortType, onSortChange }) => {
                     id="stops-select"
                     value={filters.maxStops}
                     onChange={handleStopsChange}
+                    className="filter-select-modern"
                     aria-label="Filter by number of stops"
                 >
                     <option value="all">Any</option>
@@ -56,6 +58,7 @@ const Filters = ({ filters, onFilterChange, sortType, onSortChange }) => {
                     id="price-select"
                     value={filters.maxPrice}
                     onChange={handlePriceChange}
+                    className="filter-select-modern"
                     aria-label="Filter by maximum price"
                 >
                     <option value="all">Any Price</option>

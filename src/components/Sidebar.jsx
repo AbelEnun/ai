@@ -11,43 +11,46 @@ const Sidebar = ({ onReset, plans = [], onLoadPlan, onDeletePlan, currentPlanId,
 
     return (
         <aside className="sidebar" role="navigation" aria-label="Main navigation">
-            {/* Logo Header */}
-            <div className="sidebar-header">
-                <div className="sidebar-logo">
-                    <div className="logo-icon-wrapper" aria-hidden="true">
-                        <svg className="logo-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M21 16V14L13 9V3.5C13 2.67 12.33 2 11.5 2C10.67 2 10 2.67 10 3.5V9L2 14V16L10 13.5V19L8 20.5V22L11.5 21L15 22V20.5L13 19V13.5L21 16Z" fill="#0071c2" />
-                        </svg>
-                    </div>
-                    <span className="logo-text">SkyScout</span>
-                </div>
-                {/* Hamburger Toggle */}
-                {onToggleSidebar && (
-                    <button
-                        className="hamburger-btn-inline"
-                        onClick={onToggleSidebar}
-                        aria-label="Hide sidebar"
-                    >
-                        <div className="hamburger-icon">
-                            <span></span>
-                            <span></span>
-                            <span></span>
+            {/* top area (header + action) */}
+            <div className="sidebar-top">
+                {/* Logo Header */}
+                <div className="sidebar-header">
+                    <div className="sidebar-logo">
+                        <div className="logo-icon-wrapper" aria-hidden="true">
+                            <svg className="logo-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M21 16V14L13 9V3.5C13 2.67 12.33 2 11.5 2C10.67 2 10 2.67 10 3.5V9L2 14V16L10 13.5V19L8 20.5V22L11.5 21L15 22V20.5L13 19V13.5L21 16Z" fill="#0071c2" />
+                            </svg>
                         </div>
-                    </button>
-                )}
-            </div>
+                        <span className="logo-text">SkyScout</span>
+                    </div>
+                    {/* Hamburger Toggle */}
+                    {onToggleSidebar && (
+                        <button
+                            className="hamburger-btn-inline"
+                            onClick={onToggleSidebar}
+                            aria-label="Hide sidebar"
+                        >
+                            <div className="hamburger-icon">
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                            </div>
+                        </button>
+                    )}
+                </div>
 
-            {/* New Plan Button */}
-            <button
-                className="new-plan-btn"
-                onClick={onReset}
-                aria-label="Start a new travel plan"
-            >
-                <svg className="plus-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                    <path d="M12 5V19M5 12H19" stroke="white" strokeWidth="3" strokeLinecap="round" />
-                </svg>
-                <span>Start a new plan</span>
-            </button>
+                {/* New Plan Button */}
+                <button
+                    className="new-plan-btn"
+                    onClick={onReset}
+                    aria-label="Start a new travel plan"
+                >
+                    <svg className="plus-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M12 5V19M5 12H19" stroke="white" strokeWidth="3" strokeLinecap="round" />
+                    </svg>
+                    <span>Start a new plan</span>
+                </button>
+            </div>
 
             {/* Recent Plans */}
             <div className="previous-plans">

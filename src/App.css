@@ -158,11 +158,10 @@ body {
     border-color: var(--accent-color);
 }
 
-/* Hamburger Menu Button - Floating when sidebar hidden */
-.hamburger-btn-floating {
+/* Floating buttons when sidebar hidden */
+.hamburger-btn-floating,
+.new-plan-floating {
     position: fixed;
-    top: 1.5rem;
-    left: 1rem;
     z-index: 100;
     background: var(--card-bg);
     border: 1px solid var(--border-color);
@@ -174,6 +173,33 @@ body {
     justify-content: center;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow: var(--shadow-sm);
+}
+
+.hamburger-btn-floating {
+    top: 1.5rem;
+    left: 1rem;
+}
+
+.new-plan-floating {
+    top: 1.5rem;
+    left: 5rem; /* sit to the right of the hamburger button with added gap */
+    /* appearance inherited from .new-plan-btn */
+    padding: 0.5rem 0.75rem;
+    gap: 0.35rem;
+    width: auto !important;
+    margin-bottom: 0 !important;
+}
+
+.new-plan-floating:hover {
+    background: var(--accent-dark);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.new-plan-floating .plus-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .hamburger-btn-floating:hover {
@@ -206,10 +232,24 @@ body {
 
 /* Sidebar Header */
 .sidebar-header {
-    margin-bottom: 2rem;
+    margin-bottom: 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
+}
+
+/* top grouping for header and primary action button */
+.sidebar-top {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    /* ensure it never shrinks when sidebar height is limited */
+    flex-shrink: 0;
+    margin-bottom: 1.5rem;
+    position: sticky;
+    top: 0;
+    background: var(--sidebar-bg);
+    z-index: 2;
 }
 
 .sidebar-logo {
@@ -935,6 +975,7 @@ body {
     min-height: 0;
     /* critical for flex child scrollability */
     overflow: hidden;
+    padding-bottom: 1rem; /* make room for footer */
 }
 
 .section-title {
@@ -1076,11 +1117,13 @@ body {
 
 /* Reset */
 .sidebar-footer {
-    margin-top: 0;
+    /* always sit at the bottom of the sidebar */
+    margin-top: auto;
     border-top: 1px solid var(--border-color);
     padding-top: 1rem;
     flex-shrink: 0;
 }
+
 
 .user-profile {
     display: flex;
@@ -1287,7 +1330,8 @@ body {
 .filter-group {
     display: flex;
     align-items: center;
-    background: white;
+    /* use card background so dark mode isn't broken */
+    background: var(--card-bg);
     border: 1.5px solid var(--border-color);
     padding: 0.4rem 0.85rem;
     border-radius: var(--radius-full);
@@ -2073,6 +2117,28 @@ body {
         display: none;
     }
 
+    /* ensure floating buttons remain accessible on small screens */
+    .hamburger-btn-floating,
+    .new-plan-floating {
+        top: 1rem;
+    }
+
+    .hamburger-btn-floating {
+        left: 0.75rem;
+    }
+
+    .new-plan-floating {
+        left: 3.5rem;
+    }
+
+    .new-plan-floating {
+        gap: 0.25rem;
+    }
+
+    .new-plan-floating span {
+        display: none;
+    }
+
     /* Main content adjustments */
     .main-content {
         height: calc(100vh - 70px);
@@ -2729,6 +2795,12 @@ body {
     background: #0f172a;
     border-color: var(--border-color);
     color: var(--text-primary);
+}
+
+/* ensure filter groups themselves adapt in dark mode */
+.dark .filter-group {
+    background: var(--card-bg);
+    border-color: var(--border-color);
 }
 
 /* Pill toggle (Planning / Saved tabs) */
