@@ -1,7 +1,10 @@
 /**
  * FlightDetailsModal Component
  * Shows detailed flight information in a modal overlay
+ * Now integrates with BookingModal for real booking flow
  */
+import { useState } from "react";
+import BookingModal from "./BookingModal";
 
 const formatTime = (isoString) => {
     if (!isoString) return "--";
@@ -101,13 +104,19 @@ const FlightLegDetails = ({ flight, title, isReturn = false }) => {
 };
 
 const FlightDetailsModal = ({ flight, isOpen, onClose }) => {
+    const [isBookingOpen, setIsBookingOpen] = useState(false);
+
     if (!isOpen || !flight) return null;
 
     const isRoundTrip = flight.type === "round_trip";
     const price = flight.price;
 
     const handleBooking = () => {
-        alert(`Demo: Booking process initiated for flight at $${price?.amount?.toLocaleString() || "N/A"}`);
+        setIsBookingOpen(true);
+    };
+
+    const handleBookingClose = () => {
+        setIsBookingOpen(false);
     };
 
     const handleBackdropClick = (e) => {
@@ -115,6 +124,20 @@ const FlightDetailsModal = ({ flight, isOpen, onClose }) => {
             onClose();
         }
     };
+
+    // If booking modal is open, show that instead
+    if (isBookingOpen) {
+        return (
+            <BookingModal
+                flight={flight}
+                isOpen={true}
+                onClose={() => {
+                    handleBookingClose();
+                    onClose();
+                }}
+            />
+        );
+    }
 
     return (
         <div className="modal-overlay" onClick={handleBackdropClick}>
@@ -160,7 +183,7 @@ const FlightDetailsModal = ({ flight, isOpen, onClose }) => {
                         <div className="summary-row total">
                             <span>Total Price</span>
                             <span className="price-large">
-                                ${price?.amount?.toLocaleString() || "—"}
+                                €{price?.amount?.toLocaleString() || "—"}
                             </span>
                         </div>
                     </div>
@@ -172,7 +195,7 @@ const FlightDetailsModal = ({ flight, isOpen, onClose }) => {
                         Close
                     </button>
                     <button className="btn-primary" onClick={handleBooking}>
-                        Book This Flight
+                        Book This Flight →
                     </button>
                 </div>
             </div>

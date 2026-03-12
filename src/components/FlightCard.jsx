@@ -118,7 +118,7 @@ const FlightCard = ({ flight, isSaved = false, onToggleSave, minPrice, onCardCli
     return (
         <article
             className={`flight-card-container ${isRoundTrip ? "round-trip" : ""}`}
-            aria-label={`Flight from ${airlineName}, ${price?.amount ? `$${price.amount.toLocaleString()}` : 'Price unavailable'}`}
+            aria-label={`Flight from ${airlineName}, ${price?.amount ? `€${price.amount.toLocaleString()}` : 'Price unavailable'}`}
         >
             {/* Flight Information */}
             <div className="flight-info-main">
@@ -154,8 +154,8 @@ const FlightCard = ({ flight, isSaved = false, onToggleSave, minPrice, onCardCli
                         </div>
                     )}
 
-                    <span className="price-text" aria-label={`Price: ${price?.amount ? `$${price.amount.toLocaleString()}` : 'unavailable'}`}>
-                        ${price?.amount?.toLocaleString() || "--"}
+                    <span className="price-text" aria-label={`Price: ${price?.amount ? `€${price.amount.toLocaleString()}` : 'unavailable'}`}>
+                        €{price?.amount?.toLocaleString() || "--"}
                     </span>
                     <span className="class-text">
                         {isRoundTrip ? "Round trip" : "One way"}
